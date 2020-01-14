@@ -8,4 +8,4 @@ Example applications in Jupyter notebooks use the [Digital Earth Australia](http
 
 Other requirements:
 - Python 3.6
-- Tensorflow (developed on 1.14.0)
+- Tensorflow (developed on 1.14.0). Tensorflow now includes Keras and imports in this repository will use statements like `import tensorflow.keras` rather than just `import keras`. The requirement for Tensorflow also allows experimentation in future examples with custom layers and other things that cannot be done through the high-level Keras API.
