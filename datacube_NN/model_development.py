@@ -2,6 +2,7 @@ from datacube.utils.geometry import CRS
 import numpy as np
 import tifffile
 import pandas as pd
+import os
 
 class DatacubeHarvester:
     """
@@ -26,12 +27,12 @@ class DatacubeHarvester:
         
         prod_df = dc.list_products()
         
-        self.native_crs = CRS(prod_df[prod_df['name']==prod_df]['crs'].array[0])
-        spdims = prod_df[prod_df['name']==prod_df]['spatial_dimensions'].array[0]
-        resolution = prod_df[prod_df['name']==prod_df]['resolution'].array[0]
+        self.native_crs = CRS(prod_df[prod_df['name']==product]['crs'].array[0])
+        spdims = prod_df[prod_df['name']==product]['spatial_dimensions'].array[0]
+        resolution = prod_df[prod_df['name']==product]['resolution'].array[0]
         
         res_dict = {}
-        for dim,res in zip(spdims):
+        for dim,res in zip(spdims,resolution):
             res_dict[dim] = res
         
         #we want everything as 'x','y' for consistency
@@ -50,8 +51,14 @@ class DatacubeHarvester:
                                                self.spatial_buffer[dim]+res_dict[dim],
                                                res_dict[dim])
                               for dim in self.spatial_buffer }
+        #include the tolerance in the dc.load to avoid missing values on
+        #edge of the spatial buffer
+        self.tol =   {
+                'x': abs(self.resolutions['x'])/2,
+                'y': abs(self.resolutions['y'])/2
+                }
         
-    def process(savedir, xyw_df, x_col, y_col, w_col = None, nan_value = 0):
+    def process(self,savedir, xyw_df, x_col, y_col, w_col = None, nan_value = 0):
         """
         Save labelled examples defined by the list of (point, value) pairs xy,
         and optionally weights, in a format that can be ingested by a Keras
@@ -61,35 +68,39 @@ class DatacubeHarvester:
         def _load_sample(point):
             #load a single point's sample data and return it as a numpy array.
             point = point.to_crs(self.native_crs)
-            (sitex,sitey) = point.coords
+            (sitex,sitey) = point.coords[0]
             
-            covars = dc.load(product = product,
-                             x = (sitex-self.spatial_buffer['x'],sitex+self.spatial_buffer['x']),
-                             y = (sitey-self.spatial_buffer['y'],sitey+self.spatial_buffer['y']),
+            covars = self.dc.load(product = self.prod,
+                             x = (sitex-abs(self.spatial_buffer['x'])-self.tol['x'],
+                                  sitex+abs(self.spatial_buffer['x'])+self.tol['x']),
+                             y = (sitey-abs(self.spatial_buffer['y'])-self.tol['y'],
+                                  sitey+abs(self.spatial_buffer['y'])+self.tol['y']),
                              crs = self.native_crs,
-                             **query)
+                             **self.query)
             
             if len(covars.variables) == 0: #this is probably an empty dataset from a bad query
                 return None
             
             covars = covars.reindex(x = self.reindex_masks['x']+sitex,
                                     method = 'nearest',
-                                    tolerance = abs(self.resolutions['x']/2))
+                                    tolerance = self.tol['x'])
             covars = covars.reindex(y = self.reindex_masks['y']+sitey,
                                     method = 'nearest',
-                                    tolerance = abs(self.resolutions['y']/2))
+                                    tolerance = self.tol['y'])
             
             covars = covars.fillna(nan_value)
             
             if 'time' in covars.dims:
                 covars = covars.isel(time=0)
             
-            #don't do this - tifffile requires channels-last for saving
-            #transpose to 'channels-first' format (default for TensorFlow)
-            #covars = covars.to_array().transpose('y','x','variable')
+            #needs to be a dataarray to turn to numpy
+            covars = covars.to_array()
             
             return covars.data
 
+        if not os.path.exists(savedir):
+            os.makedirs(savedir)
+        
         metadata_tab = []
         for idx, point in enumerate(xyw_df[x_col]):
             point_data = _load_sample(point)
