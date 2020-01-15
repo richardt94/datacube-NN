@@ -124,5 +124,5 @@ class DatacubeHarvester:
         
         #save the sample data as a csv for loading and reuse with
         #Keras flow_from_dataframe
-        metadata_df.to_csv(savedir+'/'+'samples.csv')
+        metadata_df.to_pickle(savedir+'/'+'samples.pkl')
         
