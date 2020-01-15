@@ -1,6 +1,6 @@
 from datacube.utils.geometry import CRS
 import numpy as np
-import tifffile as tif
+import tifffile
 import pandas as pd
 
 class DatacubeHarvester:
