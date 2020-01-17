@@ -3,6 +3,7 @@ import numpy as np
 import tifffile
 import pandas as pd
 import os
+from tensorflow.keras.utils import Sequence
 
 class DatacubeHarvester:
     """
@@ -100,6 +101,9 @@ class DatacubeHarvester:
 
         if not os.path.exists(savedir):
             os.makedirs(savedir)
+            
+        if not os.path.isdir(savedir):
+            raise ValueError('Savedir cannot point to a file')
         
         metadata_tab = []
         for idx, point in enumerate(xyw_df[x_col]):
@@ -126,3 +130,73 @@ class DatacubeHarvester:
         #Keras flow_from_dataframe
         metadata_df.to_pickle(savedir+'/'+'samples.pkl')
         
+
+class MultiTiffGenerator(Sequence):
+    """
+    Feed images created by the DatacubeHarvester. This functionality
+    is necessary because Pillow does not support images with more than
+    four channels. Keras does have *some* preprocessing layers which
+    may be able to help with restoring some of the built-in transformations
+    available to the normal ImageDataGenerator in Keras.
+    """
+    
+    def __init__(self, gen_df, x_col = 'Filename', y_col = 'Value',
+                 w_col = None, batch_size = 32, shuffle = True,
+                 img_dir = ''):
+        self.batch_size = batch_size
+        
+        self.length = len(gen_df)//batch_size
+        
+        self.shuffle = shuffle
+        
+        if self.shuffle:
+            self.gen_df = gen_df.sample(frac=1).reset_index(drop=True)
+        else:
+            self.gen_df = gen_df
+            
+        self.fnames = gen_df[x_col].to_numpy()
+        self.yvals = gen_df[y_col].to_numpy()
+        
+        if w_col is not None:
+            self.weights = gen_df[w_col]
+            
+        self.x_col = x_col
+        self.y_col = y_col
+        self.w_col = w_col
+        
+        self.img_dir = img_dir
+    
+    def __getitem__(self,index):
+        minidx,maxidx = (index*self.batch_size,(index+1)*self.batch_size)
+        y = self.yvals[minidx:maxidx]
+        
+        if self.w_col is not None:
+            w = self.weights[minidx:maxidx]
+        
+        #vectorising file I/O is stupid so let's use a for loop
+        samples = []
+        for fname in self.fnames[minidx:maxidx]:
+            samples.append(tifffile.imread(os.path.join(self.img_dir,fname)))
+        
+        X = np.stack(samples)
+        
+        #TF wants channels_last and tifffile reads channels-first
+        X = np.moveaxis(X,1,3)
+        
+        if self.w_col is not None:
+            return (X,y,w)
+        else:
+            return (X,y)
+        
+        
+    def __len__(self):
+        return self.length
+    
+    def on_epoch_end(self):
+        if self.shuffle:
+            self.gen_df = self.gen_df.sample(frac=1).reset_index(drop=True)
+            self.fnames = self.gen_df[self.x_col].to_numpy()
+            self.yvals = self.gen_df[self.y_col].to_numpy()
+        
+            if self.w_col is not None:
+                self.weights = self.gen_df[self.w_col]
