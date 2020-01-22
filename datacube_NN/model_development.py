@@ -4,6 +4,7 @@ import tifffile
 import pandas as pd
 import os
 from tensorflow.keras.utils import Sequence
+from tensorflow.keras.preprocessing.image import apply_affine_transform
 
 class DatacubeHarvester:
     """
@@ -142,7 +143,7 @@ class MultiTiffGenerator(Sequence):
     
     def __init__(self, gen_df, x_col = 'Filename', y_col = 'Value',
                  w_col = None, batch_size = 32, shuffle = True,
-                 img_dir = ''):
+                 img_dir = '', rotate = False):
         self.batch_size = batch_size
         
         self.length = len(gen_df)//batch_size
@@ -155,7 +156,7 @@ class MultiTiffGenerator(Sequence):
             self.gen_df = gen_df
             
         self.fnames = gen_df[x_col].to_numpy()
-        self.yvals = gen_df[y_col].to_numpy()
+        self.yvals = pd.to_numeric(gen_df[y_col]).to_numpy()
         
         if w_col is not None:
             self.weights = gen_df[w_col]
@@ -165,6 +166,8 @@ class MultiTiffGenerator(Sequence):
         self.w_col = w_col
         
         self.img_dir = img_dir
+        
+        self.rotate = rotate
     
     def __getitem__(self,index):
         minidx,maxidx = (index*self.batch_size,(index+1)*self.batch_size)
@@ -176,7 +179,10 @@ class MultiTiffGenerator(Sequence):
         #vectorising file I/O is stupid so let's use a for loop
         samples = []
         for fname in self.fnames[minidx:maxidx]:
-            samples.append(tifffile.imread(os.path.join(self.img_dir,fname)))
+            image = tifffile.imread(os.path.join(self.img_dir,fname))
+            if self.rotate:
+                image = apply_affine_transform(image,theta=np.random.randint(4)*90)
+            samples.append(image)
         
         X = np.stack(samples)
         
